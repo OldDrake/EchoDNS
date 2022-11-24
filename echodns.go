@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	_ "fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -12,20 +15,33 @@ import (
 func serveDNS(u *net.UDPConn, clientaddr net.Addr, request *layers.DNS) {
 	replyMess := request
 	var dnsAnswer layers.DNSResourceRecord
-	dnsAnswer.Type = layers.DNSTypeA
 	if request == nil || request.Questions == nil || len(request.Questions) == 0 {
 		return
 	} else {
 		dnsAnswer.Name = []byte(request.Questions[0].Name)
 	}
 	//fmt.Println(clientaddr.String())
-	dnsAnswer.Class = layers.DNSClassIN
 	replyMess.QR = true
 	replyMess.ANCount = 1
 	replyMess.OpCode = layers.DNSOpCodeQuery
 	replyMess.AA = true
-	dnsAnswer.IP = net.ParseIP(strings.Split(clientaddr.String(), ":")[0])
-	dnsAnswer.TTL = 1000
+	if request.Questions[0].Type == layers.DNSTypeA {
+		dnsAnswer.Type = layers.DNSTypeA
+		dnsAnswer.Class = layers.DNSClassIN
+		dnsAnswer.IP = net.ParseIP(strings.Split(clientaddr.String(), ":")[0])
+		dnsAnswer.TTL = 1000
+	} else if request.Questions[0].Type == layers.DNSTypeAAAA {
+		dnsAnswer.Type = layers.DNSTypeAAAA
+		dnsAnswer.Class = layers.DNSClassIN
+		t := time.Now().UnixMicro()
+		rdns_ipv4 := net.ParseIP(strings.Split(clientaddr.String(), ":")[0]).To4()
+		bytebuf := bytes.NewBuffer([]byte{})
+		binary.Write(bytebuf, binary.BigEndian, t)
+		binary.Write(bytebuf, binary.BigEndian, rdns_ipv4)
+		binary.Write(bytebuf, binary.BigEndian, []byte{0, 0, 0, 0})
+		dnsAnswer.IP = net.IP(bytebuf.Bytes())
+		dnsAnswer.TTL = 1000
+	}
 	replyMess.Answers = append(replyMess.Answers, dnsAnswer)
 	replyMess.ResponseCode = layers.DNSResponseCodeNoErr
 	buf := gopacket.NewSerializeBuffer()
@@ -40,7 +56,7 @@ func serveDNS(u *net.UDPConn, clientaddr net.Addr, request *layers.DNS) {
 func main() {
 	addr := net.UDPAddr{
 		Port: 53,
-		IP:   net.ParseIP("localhost.localdomain"),	//localhost
+		IP:   net.ParseIP("localhost.localdomain"), //localhost
 	}
 	u, _ := net.ListenUDP("udp", &addr)
 
