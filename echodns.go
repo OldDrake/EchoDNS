@@ -1,72 +1,118 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
-	_ "fmt"
+	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
+	"math/rand"
 
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
+	"github.com/miekg/dns"
 )
 
-func serveDNS(u *net.UDPConn, clientaddr net.Addr, request *layers.DNS) {
-	replyMess := request
-	var dnsAnswer layers.DNSResourceRecord
-	if request == nil || request.Questions == nil || len(request.Questions) == 0 {
+func strategyMaker(name string, qtype uint16) uint16 {
+	subdomain := strings.ToLower(strings.Split(name, ".")[0])
+	if qtype == dns.TypeA {
+		if strings.Contains(subdomain, "fwd") {
+			return 1 // return rdns ip in cname
+		} else if strings.Contains(subdomain, "rdns") {
+			return 2 // return honey cname record
+		} else if strings.Contains(subdomain, "honey") {
+			return 3 // return timestamp in a record
+		} else if strings.Contains(subdomain, "echo") {
+			return 4 // basic echodns
+		} else if strings.Contains(subdomain, "ttl") {
+                        return 5 // ttl test
+                }
+	}
+	return 0
+}
+
+func InttoIPv4(n uint32) net.IP {
+	b0 := (n >> 24) & 0xff
+	b1 := (n >> 16) & 0xff
+	b2 := (n >> 8) & 0xff
+	b3 := n & 0xff
+	return net.IPv4(byte(b0), byte(b1), byte(b2), byte(b3))
+}
+
+func TtlParser(domain string) uint32 {
+        subdomain := strings.ToLower(strings.Split(domain, ".")[0])
+	ttl, _ := strconv.Atoi(strings.Split(subdomain, "-")[0])
+        return uint32(ttl)
+}
+
+func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
+	var (
+		ip    net.IP
+		name  string
+		qtype uint16
+	)
+	m := new(dns.Msg)
+	m.SetReply(r)
+	m.Compress = true
+        m.Authoritative = true
+	if addr, ok := w.RemoteAddr().(*net.UDPAddr); ok {
+		ip = addr.IP
+	}
+	name = m.Question[0].Name
+	qtype = m.Question[0].Qtype
+	//fmt.Println(ip)
+	//fmt.Println(name)
+	//fmt.Println(qtype)
+	switch strategyMaker(name, qtype) {
+	case 1:
+		cname_subdomain := "rdns-" + strings.Replace(ip.String(), ".", "-", -1)
+		cname_fqdn := cname_subdomain + ".echodns.xyz."
+		cname := &dns.CNAME{
+			Hdr:    dns.RR_Header{Name: name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 14400},
+			Target: cname_fqdn,
+		}
+		//fmt.Println(name+" "+cname_fqdn)
+		m.Answer = append(m.Answer, cname)
+	case 2:
+		cname_fqdn := "honey.echodns.xyz."
+		cname := &dns.CNAME{
+			Hdr:    dns.RR_Header{Name: name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 14400},
+			Target: cname_fqdn,
+		}
+		//fmt.Println(cname_fqdn)
+		m.Answer = append(m.Answer, cname)
+	case 3:
+		time_str := strconv.FormatInt(time.Now().UnixMicro(), 10)
+		time_int, _ := strconv.Atoi(time_str[5 : len(time_str)-2])
+		time_int += rand.Intn(10000)
+		timestamp := InttoIPv4(uint32(time_int))
+		a := &dns.A{
+			Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 14400},
+			A:   timestamp,
+		}
+		m.Answer = append(m.Answer, a)
+	case 4:
+		a := &dns.A{
+			Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			A:   ip,
+		}
+		m.Answer = append(m.Answer, a)
+        case 5:
+                query_ttl := TtlParser(name)
+                //fmt.Println(query_ttl)
+                a := &dns.A{
+                        Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: query_ttl},
+                        A:   ip,
+                }
+                m.Answer = append(m.Answer, a)
+	case 0:
 		return
-	} else {
-		dnsAnswer.Name = []byte(request.Questions[0].Name)
 	}
-	//fmt.Println(clientaddr.String())
-	replyMess.QR = true
-	replyMess.ANCount = 1
-	replyMess.OpCode = layers.DNSOpCodeQuery
-	replyMess.AA = true
-	if request.Questions[0].Type == layers.DNSTypeA {
-		dnsAnswer.Type = layers.DNSTypeA
-		dnsAnswer.Class = layers.DNSClassIN
-		dnsAnswer.IP = net.ParseIP(strings.Split(clientaddr.String(), ":")[0])
-		dnsAnswer.TTL = 1000
-	} else if request.Questions[0].Type == layers.DNSTypeAAAA {
-		dnsAnswer.Type = layers.DNSTypeAAAA
-		dnsAnswer.Class = layers.DNSClassIN
-		t := time.Now().UnixMicro()
-		rdns_ipv4 := net.ParseIP(strings.Split(clientaddr.String(), ":")[0]).To4()
-		bytebuf := bytes.NewBuffer([]byte{})
-		binary.Write(bytebuf, binary.BigEndian, t)
-		binary.Write(bytebuf, binary.BigEndian, rdns_ipv4)
-		binary.Write(bytebuf, binary.BigEndian, []byte{0, 0, 0, 0})
-		dnsAnswer.IP = net.IP(bytebuf.Bytes())
-		dnsAnswer.TTL = 1000
-	}
-	replyMess.Answers = append(replyMess.Answers, dnsAnswer)
-	replyMess.ResponseCode = layers.DNSResponseCodeNoErr
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{}
-	err := replyMess.SerializeTo(buf, opts)
-	if err != nil {
-		panic(err)
-	}
-	u.WriteTo(buf.Bytes(), clientaddr)
+	w.WriteMsg(m)
 }
 
 func main() {
-	addr := net.UDPAddr{
-		Port: 53,
-		IP:   net.ParseIP("localhost.localdomain"), //localhost
-	}
-	u, _ := net.ListenUDP("udp", &addr)
-
-	for {
-		tmp := make([]byte, 1024)
-		_, addr, _ := u.ReadFrom(tmp)
-		clientaddr := addr
-		packet := gopacket.NewPacket(tmp, layers.LayerTypeDNS, gopacket.Default)
-		dnsPacket := packet.Layer(layers.LayerTypeDNS)
-		tcp, _ := dnsPacket.(*layers.DNS)
-		serveDNS(u, clientaddr, tcp)
+	dns.HandleFunc("echodns.xyz.", handleReflect)
+	server := &dns.Server{Addr: ":53", Net: "udp"}
+	if err := server.ListenAndServe(); err != nil {
+		fmt.Println("Failed to set up dns server!")
 	}
 }
