@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
 	"time"
-	"math/rand"
 
 	"github.com/miekg/dns"
 )
@@ -23,8 +23,8 @@ func strategyMaker(name string, qtype uint16) uint16 {
 		} else if strings.Contains(subdomain, "echo") {
 			return 4 // basic echodns
 		} else if strings.Contains(subdomain, "ttl") {
-                        return 5 // ttl test
-                }
+			return 5 // ttl test
+		}
 	}
 	return 0
 }
@@ -38,9 +38,9 @@ func InttoIPv4(n uint32) net.IP {
 }
 
 func TtlParser(domain string) uint32 {
-        subdomain := strings.ToLower(strings.Split(domain, ".")[0])
+	subdomain := strings.ToLower(strings.Split(domain, ".")[0])
 	ttl, _ := strconv.Atoi(strings.Split(subdomain, "-")[0])
-        return uint32(ttl)
+	return uint32(ttl)
 }
 
 func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
@@ -52,7 +52,7 @@ func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Compress = true
-        m.Authoritative = true
+	m.Authoritative = true
 	if addr, ok := w.RemoteAddr().(*net.UDPAddr); ok {
 		ip = addr.IP
 	}
@@ -95,14 +95,14 @@ func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
 			A:   ip,
 		}
 		m.Answer = append(m.Answer, a)
-        case 5:
-                query_ttl := TtlParser(name)
-                //fmt.Println(query_ttl)
-                a := &dns.A{
-                        Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: query_ttl},
-                        A:   ip,
-                }
-                m.Answer = append(m.Answer, a)
+	case 5:
+		query_ttl := TtlParser(name)
+		//fmt.Println(query_ttl)
+		a := &dns.A{
+			Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: query_ttl},
+			A:   ip,
+		}
+		m.Answer = append(m.Answer, a)
 	case 0:
 		return
 	}
