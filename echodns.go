@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"strconv"
@@ -46,6 +47,8 @@ func TtlParser(domain string) uint32 {
 func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
 	var (
 		ip    net.IP
+		port  int
+		id    uint16
 		name  string
 		qtype uint16
 	)
@@ -55,9 +58,12 @@ func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
 	m.Authoritative = true
 	if addr, ok := w.RemoteAddr().(*net.UDPAddr); ok {
 		ip = addr.IP
+		port = addr.Port
 	}
+	id = m.MsgHdr.Id
 	name = m.Question[0].Name
 	qtype = m.Question[0].Qtype
+	log.Printf("%v|%v|%v|%v|%v", ip, port, id, name, qtype)
 	//fmt.Println(ip)
 	//fmt.Println(name)
 	//fmt.Println(qtype)
@@ -114,5 +120,6 @@ func main() {
 	server := &dns.Server{Addr: ":53", Net: "udp"}
 	if err := server.ListenAndServe(); err != nil {
 		fmt.Println("Failed to set up dns server!")
+		panic(err)
 	}
 }

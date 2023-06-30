@@ -2,7 +2,7 @@ module echodns
 
 go 1.20
 
-require github.com/miekg/dns v1.1.54
+require github.com/miekg/dns v1.1.55
 
 require (
 	golang.org/x/mod v0.7.0 // indirect
