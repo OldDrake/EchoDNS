@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"strconv"
@@ -10,6 +9,8 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 func strategyMaker(name string, qtype uint16) uint16 {
@@ -63,7 +64,8 @@ func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
 	id = m.MsgHdr.Id
 	name = m.Question[0].Name
 	qtype = m.Question[0].Qtype
-	log.Printf("%v|%v|%v|%v|%v", ip, port, id, name, qtype)
+	log.Log().Str("sip", ip.String()).Int64("port", int64(port)).Int64("id", int64(id)).Str("name", name).Int64("qtype", int64(qtype)).Msg("")
+	//log.Printf("%v|%v|%v|%v|%v", ip, port, id, name, qtype)
 	//fmt.Println(ip)
 	//fmt.Println(name)
 	//fmt.Println(qtype)
@@ -116,6 +118,7 @@ func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
 }
 
 func main() {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	dns.HandleFunc("echodns.xyz.", handleReflect)
 	server := &dns.Server{Addr: ":53", Net: "udp"}
 	if err := server.ListenAndServe(); err != nil {
