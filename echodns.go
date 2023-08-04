@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math/rand"
 	"net"
@@ -12,6 +13,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
+
+var CONFIG_SLD string
 
 func strategyMaker(name string, qtype uint16) uint16 {
 	subdomain := strings.ToLower(strings.Split(name, ".")[0])
@@ -72,7 +75,7 @@ func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
 	switch strategyMaker(name, qtype) {
 	case 1:
 		cname_subdomain := "rdns-" + strings.Replace(ip.String(), ".", "-", -1)
-		cname_fqdn := cname_subdomain + ".echodns.xyz."
+		cname_fqdn := dns.Fqdn(cname_subdomain + "." + CONFIG_SLD)
 		cname := &dns.CNAME{
 			Hdr:    dns.RR_Header{Name: name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 14400},
 			Target: cname_fqdn,
@@ -80,7 +83,7 @@ func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
 		//fmt.Println(name+" "+cname_fqdn)
 		m.Answer = append(m.Answer, cname)
 	case 2:
-		cname_fqdn := "honey.echodns.xyz."
+		cname_fqdn := dns.Fqdn("honey." + CONFIG_SLD)
 		cname := &dns.CNAME{
 			Hdr:    dns.RR_Header{Name: name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 14400},
 			Target: cname_fqdn,
@@ -118,8 +121,13 @@ func handleReflect(w dns.ResponseWriter, r *dns.Msg) {
 }
 
 func main() {
+	flag.StringVar(&CONFIG_SLD, "sld", "", "configure sld for echo dns server")
+	flag.Parse()
+	if CONFIG_SLD == "" {
+		panic("Please configure the SLD for the echo dns server!\n")
+	}
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	dns.HandleFunc("echodns.xyz.", handleReflect)
+	dns.HandleFunc(dns.Fqdn(CONFIG_SLD), handleReflect)
 	server := &dns.Server{Addr: ":53", Net: "udp"}
 	if err := server.ListenAndServe(); err != nil {
 		fmt.Println("Failed to set up dns server!")
